@@ -241,4 +241,81 @@ exports.getLatestMediaByType = async (req, res) => {
       });
     }
   };
-  
+
+
+// Get stats for a user's media (only rated media)
+exports.getMediaStats = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        // Fetch all media for the user with rating > 0
+        const ratedMedia = await Media.find({
+            userId,
+            rating: { $gt: 0 }
+        });
+
+        // Count by type + rating stats
+        let movieCount = 0;
+        let tvCount = 0;
+        let totalRating = 0;
+        const listRatingCountMap = new Map();
+
+        ratedMedia.forEach(media => {
+            if (media.type === 'movie') {
+                movieCount++;
+            } else if (media.type === 'tv') {
+                tvCount++;
+            }
+
+            totalRating += media.rating;
+
+            // Count how many rated media per list
+            const listIdStr = String(media.listId);
+            listRatingCountMap.set(
+                listIdStr,
+                (listRatingCountMap.get(listIdStr) || 0) + 1
+            );
+        });
+
+        const averageRating = ratedMedia.length > 0
+            ? (totalRating / ratedMedia.length).toFixed(2)
+            : null;
+
+        // Find the list with the most rated items
+        let mostRatedListId = null;
+        let highestCount = 0;
+        for (const [listId, count] of listRatingCountMap.entries()) {
+            if (count > highestCount) {
+                mostRatedListId = listId;
+                highestCount = count;
+            }
+        }
+
+        // Fetch the list title if a most-used list is found
+        let mostUsedList = null;
+        if (mostRatedListId) {
+            const list = await List.findById(mostRatedListId);
+            if (list) {
+                mostUsedList = {
+                    listId: list._id,
+                    title: list.title,
+                    count: highestCount
+                };
+            }
+        }
+
+        res.status(200).json({
+            totalRatedMovies: movieCount,
+            totalRatedTVShows: tvCount,
+            averageRating: averageRating ? Number(averageRating) : 0,
+            mostUsedList
+        });
+
+    } catch (error) {
+        console.error('Error getting media stats:', error);
+        res.status(500).json({
+            message: 'Error getting media stats',
+            error: error.message
+        });
+    }
+};

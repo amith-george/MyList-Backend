@@ -86,8 +86,7 @@ exports.loginUser = async (req, res) => {
     // Generate a JWT token
     const token = jwt.sign(
       { id: user._id, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: '10d' } // Token expires in 1 hour. Adjust as needed.
+      process.env.JWT_SECRET
     );
 
     // Return the token along with user info (excluding password)
