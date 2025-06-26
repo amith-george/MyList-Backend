@@ -6,6 +6,8 @@ router.get('/movies/popular', tmdbController.popularMovies);
 
 router.get('/movies/latest', tmdbController.newlyReleased);
 
+router.get('/movies/upcoming', tmdbController.upcomingMovies);
+
 router.get('/movies/top-rated', tmdbController.topRatedMovies);
 
 router.get('/movies/category/:category', tmdbController.categoryMovies);

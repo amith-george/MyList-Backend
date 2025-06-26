@@ -8,9 +8,6 @@ router.post('/:userId/create', listController.createList); // Assuming userId is
 // Get all lists by user
 router.get('/:userId', listController.getListsByUser);
 
-// Get a list by ID
-router.get('/:userId/:id', listController.getListMedia);
-
 // Update a list
 router.put('/:userId/:id/update', listController.updateList);
 
@@ -19,5 +16,8 @@ router.delete('/:userId/:id/delete', listController.deleteList);
 
 // Route to get media counts by type for a list
 router.get('/:userId/:listId/counts', listController.getMediaCountByType);
+
+// Route to get List items enriched with TMDB
+router.get('/:userId/:id', listController.getListMediaWithDetails);
 
 module.exports = router;

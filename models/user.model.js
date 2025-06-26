@@ -4,12 +4,14 @@ const bcrypt = require('bcrypt');
 const userSchema = new mongoose.Schema({
     username: {
         type: String,
+        unique: true,
         required: true,
         minlength: [3, 'Username must be at least 3 characters long'],
         maxlength: [30, 'Username cannot be more than 30 characters'],
     },
     email: {
         type: String,
+        unique: true,
         required: true,
         minlength: [5, 'Email must be at least 5 characters long'],
     },
@@ -19,8 +21,13 @@ const userSchema = new mongoose.Schema({
         select: false,
     },
     bio: { 
-        type: String, 
+        type: String,
+        maxlength: [150, 'Bio cannot exceed 150 characters'], 
         default: '' 
+    },
+    avatar: {
+        type: String,
+        default: 'boy1.png',
     },
     createdAt: {
         type: Date,

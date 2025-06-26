@@ -1,7 +1,11 @@
 const mongoose = require('mongoose');
+const axios = require('axios');
 const List = require('../models/list.model');
 const User = require('../models/user.model'); // Assuming you need to reference the User model
 const Media = require('../models/media.model');
+
+const TMDB_API_KEY = process.env.TMDB_API_KEY; // Accessing the API key from .env
+const TMDB_BASE_URL = process.env.TMDB_BASE_URL; // Accessing the base URL from .env
 
 // Create a new list
 exports.createList = async (req, res) => {
@@ -34,35 +38,6 @@ exports.getListsByUser = async (req, res) => {
       res.status(200).json(lists);
     } catch (error) {
       res.status(400).json({ message: 'Error fetching lists', error: error.message });
-    }
-};
-
-
-
-// Get a list by ID and verify it belongs to the user
-exports.getListMedia = async (req, res) => {
-    try {
-        const { userId, id: listId } = req.params;
-
-        // Find the user to verify their list array
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ message: 'User not found' });
-        }
-
-        // Check if the listId exists in the user's lists array
-        if (!user.lists.some(list => list.toString() === listId)) {
-            return res.status(403).json({ message: 'List not associated with this user' });
-        }
-
-        // Fetch the list with populated media items
-        const list = await List.findById(listId).populate('mediaItems');
-        if (!list) {
-            return res.status(404).json({ message: 'List not found' });
-        }
-        res.status(200).json(list);
-    } catch (error) {
-        res.status(400).json({ message: 'Error retrieving list', error: error.message });
     }
 };
 
@@ -178,5 +153,93 @@ exports.getMediaCountByType = async (req, res) => {
       message: 'Error retrieving media counts',
       error: error.message
     });
+  }
+};
+
+// To get all the media inside of a list enriched with TMDB data
+exports.getListMediaWithDetails = async (req, res) => {
+  try {
+    const { userId, id: listId } = req.params;
+    const { page = 1, limit = 28 } = req.query;
+
+    // Step 1: Verify user
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    if (!user.lists.includes(listId)) {
+      return res.status(403).json({ message: 'List not associated with this user' });
+    }
+
+    // Step 2: Find list and populate media
+    const list = await List.findById(listId).populate('mediaItems');
+    if (!list) return res.status(404).json({ message: 'List not found' });
+
+    const start = (page - 1) * limit;
+    const end = start + parseInt(limit);
+
+    const paginatedItems = list.mediaItems.slice(start, end);
+
+    // Step 3: Enrich each media item from TMDb
+    const enrichedMedia = await Promise.all(
+      paginatedItems.map(async (media) => {
+        try {
+          const { tmdbId, type } = media;
+
+          const [details, videos, credits] = await Promise.all([
+            axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}`, {
+              params: { language: 'en-US' },
+              headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
+            }),
+            axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}/videos`, {
+              headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
+            }),
+            axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}/credits`, {
+              headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
+            }),
+          ]);
+
+          const trailer = videos.data.results.find(
+            (video) => video.site === 'YouTube' && video.type === 'Trailer'
+          );
+
+          return {
+            ...media.toObject(),
+            title: details.data.title || details.data.name,
+            overview: details.data.overview,
+            release_date: details.data.release_date || details.data.first_air_date,
+            vote_average: details.data.vote_average,
+            poster_path: details.data.poster_path,
+            media_type: type,
+            trailer_key: trailer?.key || null,
+            director: credits.data.crew.find((c) => c.job === 'Director')?.name || null,
+            cast: credits.data.cast.slice(0, 5).map((actor) => ({
+              name: actor.name,
+              character: actor.character,
+            })),
+          };
+        } catch (err) {
+          console.error(`TMDb fetch failed for media ID ${media.tmdbId}:`, err.message);
+          return media; // fallback to raw media item
+        }
+      })
+    );
+
+    res.status(200).json({
+      list: {
+        _id: list._id,
+        title: list.title,
+        description: list.description,
+      },
+      mediaItems: enrichedMedia,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        totalItems: list.mediaItems.length,
+        totalPages: Math.ceil(list.mediaItems.length / limit),
+      },
+    });
+  } catch (err) {
+    console.error('Error in getListMediaWithDetails:', err.message);
+    res.status(500).json({ message: 'Internal server error', error: err.message });
   }
 };

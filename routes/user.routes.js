@@ -10,11 +10,13 @@ router.post('/login', userController.loginUser);
 
 router.post('/reset-password', userController.resetPassword);
 
-router.get('/:id', authenticateToken, userController.getUser);
-
 router.put('/:id', authenticateToken, userController.updateUser);
 
 router.delete('/:id', authenticateToken, userController.deleteUser);
+
+router.get('/:id', authenticateToken, userController.getUser);
+
+router.get('/public/:username', userController.getUserByUsername);
 
 module.exports = router;
 

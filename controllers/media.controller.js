@@ -171,43 +171,74 @@ exports.getMediaDetails = async (req, res) => {
 };
 
 
-
-// Get 15 latest media items of a given media type for a specific user
+// Get 15 latest media items of a given media type for a specific user, enriched with TMDb data
 exports.getLatestMediaByType = async (req, res) => {
-  try {
-    // Expect userId and mediaType from URL parameters
-    const { userId, mediaType } = req.params;
-    const allowedTypes = ['movie', 'tv', 'anime'];
-    if (!allowedTypes.includes(mediaType)) {
-      return res.status(400).json({ message: 'Invalid media type' });
+    try {
+      const { userId, mediaType } = req.params;
+      const allowedTypes = ['movie', 'tv', 'anime'];
+      if (!allowedTypes.includes(mediaType)) {
+        return res.status(400).json({ message: 'Invalid media type' });
+      }
+  
+      // Step 1: Fetch latest 15 media items of given type for this user
+      const latestMedia = await Media.find({ type: mediaType, userId })
+        .sort({ createdAt: -1 })
+        .limit(15);
+  
+      // Step 2: Enrich each media item with TMDb + list title
+      const enrichedMedia = await Promise.all(
+        latestMedia.map(async (mediaItem) => {
+          try {
+            const mediaObj = mediaItem.toObject();
+            const { tmdbId, type, listId } = mediaObj;
+  
+            // Fetch TMDb details
+            const [details, videos] = await Promise.all([
+              axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}`, {
+                params: { language: 'en-US' },
+                headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
+              }),
+              axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}/videos`, {
+                headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
+              }),
+            ]);
+  
+            const trailer = videos.data.results.find(
+              (video) => video.site === 'YouTube' && video.type === 'Trailer'
+            );
+  
+            // Optional: Get list name if present
+            let listname = null;
+            if (listId) {
+              const listDetails = await List.findById(listId);
+              listname = listDetails ? listDetails.title : null;
+            }
+  
+            return {
+              ...mediaObj,
+              title: details.data.title || details.data.name,
+              overview: details.data.overview,
+              release_date: details.data.release_date || details.data.first_air_date,
+              vote_average: details.data.vote_average,
+              poster_path: details.data.poster_path,
+              trailer_key: trailer?.key || null,
+              media_type: type,
+              listname,
+            };
+          } catch (err) {
+            console.error(`TMDb enrichment failed for media ID ${mediaItem.tmdbId}:`, err.message);
+            return mediaItem.toObject(); // fallback to raw item
+          }
+        })
+      );
+  
+      res.status(200).json(enrichedMedia);
+    } catch (error) {
+      console.error('Error fetching latest media by type:', error);
+      res.status(500).json({
+        message: 'Error fetching latest media by type',
+        error: error.message
+      });
     }
-
-    // Find media items with the specified type and userId,
-    // sorted by createdAt descending, limiting to 12.
-    const latestMedia = await Media.find({ type: mediaType, userId: userId })
-      .sort({ createdAt: -1 })
-      .limit(15);
-
-    // Enrich each media item with the list name (if listId is present)
-    const enrichedMedia = await Promise.all(
-      latestMedia.map(async (mediaItem) => {
-        const mediaObj = mediaItem.toObject();
-        // Assume mediaObj.listId holds the ID of the list this media belongs to
-        if (mediaObj.listId) {
-          const listDetails = await List.findById(mediaObj.listId);
-          mediaObj.listname = listDetails ? listDetails.title : null;
-        }
-        return mediaObj;
-      })
-    );
-
-    res.status(200).json(enrichedMedia);
-  } catch (error) {
-    console.error('Error fetching latest media by type:', error);
-    res.status(500).json({
-      message: 'Error fetching latest media by type',
-      error: error.message
-    });
-  }
-};
-
+  };
+  

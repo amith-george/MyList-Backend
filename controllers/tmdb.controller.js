@@ -5,67 +5,67 @@ const TMDB_API_KEY = process.env.TMDB_API_KEY; // Accessing the API key from .en
 const TMDB_BASE_URL = process.env.TMDB_BASE_URL; // Accessing the base URL from .env
 
 
-// Function to fetch popular movies from TMDb
+// Function to fetch popular movies from TMDb for search page
 exports.popularMovies = async (req, res) => {
-    // Get the starting page from the query, default to 1
-    const page = Number(req.query.page) || 1;
-    const secondPage = page + 1;
-
+    const frontendPage = Number(req.query.page) || 1;
+  
+    // Calculate TMDb pages to fetch based on frontend page
+    const tmdbPage1 = (frontendPage - 1) * 2 + 1;
+    const tmdbPage2 = tmdbPage1 + 1;
+  
     try {
-        const url = `${TMDB_BASE_URL}/movie/popular`;
-        console.log('Requesting URL:', url, 'Pages:', page, 'and', secondPage);
-
-        // Fetch two pages concurrently
-        const [response1, response2] = await Promise.all([
-            axios.get(url, {
-                params: {
-                    language: 'en-US',
-                    page: page,
-                },
-                headers: {
-                    accept: 'application/json',
-                    Authorization: `Bearer ${TMDB_API_KEY}`
-                }
-            }),
-            axios.get(url, {
-                params: {
-                    language: 'en-US',
-                    page: secondPage,
-                },
-                headers: {
-                    accept: 'application/json',
-                    Authorization: `Bearer ${TMDB_API_KEY}`
-                }
-            })
-        ]);
-
-        // Merge results from both pages
-        const combinedResults = [
-            ...response1.data.results,
-            ...response2.data.results
-        ];
-
-        // Add media_type and remove duplicates
-        const uniqueResults = combinedResults
-            .map(item => ({ ...item, media_type: 'movie' })) // Explicitly set media_type
-            .filter((item, index, self) =>
-                self.findIndex(t => t.id === item.id) === index
-            )
-            .slice(0, 36); // Limit to 36 items
-
-        res.status(200).json({
-            currentPage: page,
-            totalPages: response1.data.total_pages,
-            results: uniqueResults
-        });
+      const url = `${TMDB_BASE_URL}/movie/popular`;
+      console.log('Requesting TMDb pages:', tmdbPage1, 'and', tmdbPage2);
+  
+      const [response1, response2] = await Promise.all([
+        axios.get(url, {
+          params: { language: 'en-US', page: tmdbPage1 },
+          headers: {
+            accept: 'application/json',
+            Authorization: `Bearer ${TMDB_API_KEY}`,
+          },
+        }),
+        axios.get(url, {
+          params: { language: 'en-US', page: tmdbPage2 },
+          headers: {
+            accept: 'application/json',
+            Authorization: `Bearer ${TMDB_API_KEY}`,
+          },
+        }),
+      ]);
+  
+      // Merge and deduplicate
+      const combinedResults = [
+        ...response1.data.results,
+        ...response2.data.results,
+      ];
+  
+      const uniqueResults = combinedResults
+        .map((item) => ({ ...item, media_type: 'movie' }))
+        .filter(
+          (item, index, self) =>
+            self.findIndex((t) => t.id === item.id) === index
+        );
+  
+      // Return 35 results for this page, carry over 5
+      const results = uniqueResults.slice(0, 35);
+      const carryOver = uniqueResults.slice(35, 40); // remaining 5
+  
+      res.status(200).json({
+        currentPage: frontendPage,
+        totalPages: Math.ceil(response1.data.total_pages / 2),
+        results,
+        carryOver,
+      });
     } catch (error) {
-        console.error('Error fetching popular movies:', error);
-        res.status(500).json({ 
-            message: 'Error fetching popular movies', 
-            error: error.message 
-        });
+      console.error('Error fetching popular movies:', error);
+      res.status(500).json({
+        message: 'Error fetching popular movies',
+        error: error.message,
+      });
     }
-};
+  };
+  
 
 
 
@@ -108,102 +108,130 @@ exports.newlyReleased = async (req, res) => {
 
 
 
-
-
-// Function to fetch all movies released in the current year and the previous year, sorted by vote count with a minimum vote count
+// Function to fetch top-rated movies globally (without year filtering)
 exports.topRatedMovies = async (req, res) => {
-    const currentYear = new Date().getFullYear(); // Get the current year
-    const previousYear = currentYear - 1; // Get the previous year
-    const years = [previousYear, currentYear]; // Array of years to check
-    const allMovies = []; // Array to hold all movies
-
     try {
-        for (const year of years) {
-            const url = `${TMDB_BASE_URL}/discover/movie`;
-            console.log('Requesting URL:', url, 'Year:', year); // Log the full URL and year
-
-            const response = await axios.get(url, {
-                params: {
-                    language: 'en-US',
-                    sort_by: 'vote_count.desc', // Sort by vote count (highest first)
-                    primary_release_year: year, // Filter by release year
-                    page: 1 // You can adjust the page number as needed
-                },
-                headers: {
-                    accept: 'application/json',
-                    Authorization: `Bearer ${TMDB_API_KEY}` // Use the API key as a Bearer token
-                }
-            });
-
-            // Add the results from the current year to the allMovies array
-            allMovies.push(...response.data.results);
-        }
-
-        // Sort the combined movies by rating (vote_average) in descending order
-        const sortedMovies = allMovies.sort((a, b) => b.vote_count - a.vote_count);
-
-        // Get the first 10 movies
-        const top10Movies = sortedMovies.slice(0, 15);
-
-        res.status(200).json(top10Movies);
+      const url = `${TMDB_BASE_URL}/movie/top_rated`;
+      console.log('Requesting URL:', url);
+  
+      const response = await axios.get(url, {
+        params: {
+          language: 'en-US',
+          page: 1, // First page of top-rated movies
+        },
+        headers: {
+          accept: 'application/json',
+          Authorization: `Bearer ${TMDB_API_KEY}`,
+        },
+      });
+  
+      const topMovies = response.data.results.slice(0, 15);
+  
+      res.status(200).json(topMovies);
     } catch (error) {
-        console.error('Error details:', error); // Log the error details for debugging
-        res.status(500).json({ message: 'Error fetching movies for the current and previous year', error: error.message });
+      console.error('Error details:', error);
+      res.status(500).json({
+        message: 'Error fetching top-rated movies',
+        error: error.message,
+      });
     }
-};
+  };
 
 
-
-// Function to fetch movies by category for the current year and the previous year
-exports.categoryMovies = async (req, res) => {
-    const { category } = req.params; // category should be 'action', 'comedy', or 'romance'
-    const currentYear = new Date().getFullYear(); // Get the current year
-    const previousYear = currentYear - 1; // Get the previous year
-    const years = [previousYear, currentYear]; // Array of years to check
-    const allMovies = []; // Array to hold all movies
-
+  exports.upcomingMovies = async (req, res) => {
     try {
-        // Fetch genre ID based on the category
-        const genreResponse = await axios.get(`${TMDB_BASE_URL}/genre/movie/list`, {
-            headers: {
-                accept: 'application/json',
-                Authorization: `Bearer ${TMDB_API_KEY}`
-            }
+      const today = new Date();
+      const maxPages = 5; // Try up to 5 pages
+      let page = 1;
+      const collected = [];
+  
+      while (collected.length < 15 && page <= maxPages) {
+        const url = `${TMDB_BASE_URL}/movie/upcoming`;
+        console.log(`Fetching page ${page} from upcoming movies...`);
+  
+        const response = await axios.get(url, {
+          params: {
+            language: 'en-US',
+            page,
+          },
+          headers: {
+            accept: 'application/json',
+            Authorization: `Bearer ${TMDB_API_KEY}`,
+          },
         });
-
-        const genreId = genreResponse.data.genres.find(genre => genre.name.toLowerCase() === category.toLowerCase()).id;
-
-        // Fetch movies for each year in the specified category
-        for (const year of years) {
-            const moviesResponse = await axios.get(`${TMDB_BASE_URL}/discover/movie`, {
-                params: {
-                    with_genres: genreId,
-                    sort_by: 'vote_count.desc', // Sort by vote count (highest first)
-                    primary_release_year: year, // Filter by release year
-                    language: 'en-US'
-                },
-                headers: {
-                    accept: 'application/json',
-                    Authorization: `Bearer ${TMDB_API_KEY}`
-                }
-            });
-
-            // Add the results from the current year to the allMovies array
-            allMovies.push(...moviesResponse.data.results);
-        }
-
-        // Sort the combined movies by vote count in descending order
-        const sortedMovies = allMovies.sort((a, b) => b.vote_count - a.vote_count);
-
-        // Get the first 10 movies
-        const top10Movies = sortedMovies.slice(0, 15);
-
-        res.status(200).json(top10Movies);
+  
+        // Filter future releases
+        const futureOnly = response.data.results.filter((movie) => {
+          const releaseDate = new Date(movie.release_date);
+          return releaseDate > today;
+        });
+  
+        collected.push(...futureOnly);
+        page += 1;
+  
+        if (response.data.total_pages && page > response.data.total_pages) break;
+      }
+  
+      // Sort collected movies by popularity descending
+      const sorted = collected
+        .sort((a, b) => b.popularity - a.popularity)
+        .slice(0, 15); // Take top 15
+  
+      res.status(200).json(sorted);
     } catch (error) {
-        console.error('Error details:', error); // Log the error details for debugging
-        res.status(500).json({ message: `Error fetching ${category} movies`, error: error.message });
+      console.error('Error fetching upcoming movies:', error);
+      res.status(500).json({
+        message: 'Error fetching upcoming movies',
+        error: error.message,
+      });
     }
-};
+  };
+  
+
+// Function to fetch popular movies by genre (no year filtering)
+exports.categoryMovies = async (req, res) => {
+    const { category } = req.params;
+  
+    try {
+      // Fetch genre list to find matching genre ID
+      const genreResponse = await axios.get(`${TMDB_BASE_URL}/genre/movie/list`, {
+        headers: {
+          accept: 'application/json',
+          Authorization: `Bearer ${TMDB_API_KEY}`,
+        },
+      });
+  
+      const genre = genreResponse.data.genres.find(
+        (g) => g.name.toLowerCase() === category.toLowerCase()
+      );
+  
+      if (!genre) {
+        return res.status(404).json({ message: `Genre '${category}' not found` });
+      }
+  
+      // Fetch popular movies in this genre
+      const moviesResponse = await axios.get(`${TMDB_BASE_URL}/discover/movie`, {
+        params: {
+          with_genres: genre.id,
+          sort_by: 'popularity.desc',
+          language: 'en-US',
+        },
+        headers: {
+          accept: 'application/json',
+          Authorization: `Bearer ${TMDB_API_KEY}`,
+        },
+      });
+  
+      res.status(200).json(moviesResponse.data.results);
+    } catch (error) {
+      console.error('Error fetching genre movies:', error);
+      res.status(500).json({
+        message: `Error fetching ${category} movies`,
+        error: error.message,
+      });
+    }
+  };
+  
 
 
 // Function to fetch TV shows sorted by popularity
