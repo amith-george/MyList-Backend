@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const axios = require('axios');
-const pLimit = require('p-limit');
+const pLimit = require('p-limit').default;
 const List = require('../models/list.model');
 const User = require('../models/user.model'); // Assuming you need to reference the User model
 const Media = require('../models/media.model');
