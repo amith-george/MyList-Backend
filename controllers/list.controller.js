@@ -1,9 +1,11 @@
 const mongoose = require('mongoose');
 const axios = require('axios');
+const pLimit = require('p-limit');
 const List = require('../models/list.model');
 const User = require('../models/user.model'); // Assuming you need to reference the User model
 const Media = require('../models/media.model');
 
+const limit = pLimit(40); // Limit to 40 concurrent TMDb API calls
 const TMDB_API_KEY = process.env.TMDB_API_KEY; // Accessing the API key from .env
 const TMDB_BASE_URL = process.env.TMDB_BASE_URL; // Accessing the base URL from .env
 
@@ -156,13 +158,11 @@ exports.getMediaCountByType = async (req, res) => {
   }
 };
 
-// To get all the media inside of a list enriched with TMDB data
 exports.getListMediaWithDetails = async (req, res) => {
   try {
     const { userId, id: listId } = req.params;
-    const { page = 1, limit = 28 } = req.query;
+    const { page = 1, limit: queryLimit = 28 } = req.query;
 
-    // Step 1: Verify user
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
@@ -170,32 +170,36 @@ exports.getListMediaWithDetails = async (req, res) => {
       return res.status(403).json({ message: 'List not associated with this user' });
     }
 
-    // Step 2: Find list and populate media
     const list = await List.findById(listId).populate('mediaItems');
     if (!list) return res.status(404).json({ message: 'List not found' });
 
-    const start = (page - 1) * limit;
-    const end = start + parseInt(limit);
+    const start = (page - 1) * queryLimit;
+    const end = start + parseInt(queryLimit);
 
     const paginatedItems = list.mediaItems.slice(start, end);
 
-    // Step 3: Enrich each media item from TMDb
     const enrichedMedia = await Promise.all(
       paginatedItems.map(async (media) => {
         try {
           const { tmdbId, type } = media;
 
           const [details, videos, credits] = await Promise.all([
-            axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}`, {
-              params: { language: 'en-US' },
-              headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
-            }),
-            axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}/videos`, {
-              headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
-            }),
-            axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}/credits`, {
-              headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
-            }),
+            limit(() =>
+              axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}`, {
+                params: { language: 'en-US' },
+                headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
+              })
+            ),
+            limit(() =>
+              axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}/videos`, {
+                headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
+              })
+            ),
+            limit(() =>
+              axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}/credits`, {
+                headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
+              })
+            ),
           ]);
 
           const trailer = videos.data.results.find(
@@ -218,8 +222,12 @@ exports.getListMediaWithDetails = async (req, res) => {
             })),
           };
         } catch (err) {
-          console.error(`TMDb fetch failed for media ID ${media.tmdbId}:`, err.message);
-          return media; // fallback to raw media item
+          console.error(`TMDb fetch failed for media ID ${media.tmdbId}:`, {
+            message: err.message,
+            status: err.response?.status,
+            data: err.response?.data,
+          });
+          return media; // fallback
         }
       })
     );
@@ -233,9 +241,9 @@ exports.getListMediaWithDetails = async (req, res) => {
       mediaItems: enrichedMedia,
       pagination: {
         page: Number(page),
-        limit: Number(limit),
+        limit: Number(queryLimit),
         totalItems: list.mediaItems.length,
-        totalPages: Math.ceil(list.mediaItems.length / limit),
+        totalPages: Math.ceil(list.mediaItems.length / queryLimit),
       },
     });
   } catch (err) {
