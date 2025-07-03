@@ -7,6 +7,10 @@ const List = require('../models/list.model');
 exports.registerUser = async (req, res) => {
     try {
       const { username, email, password } = req.body;
+
+      if (/\s/.test(username)) {
+        return res.status(400).json({ message: 'Username cannot contain spaces' });
+      }
   
       // Check if a user with the provided email or username already exists
       const existingUser = await User.findOne({

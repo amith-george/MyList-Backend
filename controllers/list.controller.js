@@ -158,6 +158,8 @@ exports.getMediaCountByType = async (req, res) => {
   }
 };
 
+
+// Get list media with details
 exports.getListMediaWithDetails = async (req, res) => {
   try {
     const { userId, id: listId } = req.params;

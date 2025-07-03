@@ -8,6 +8,12 @@ const userSchema = new mongoose.Schema({
         required: true,
         minlength: [3, 'Username must be at least 3 characters long'],
         maxlength: [30, 'Username cannot be more than 30 characters'],
+        validate: {
+            validator: function (v) {
+                return /^\S+$/.test(v); // No spaces allowed
+            },
+            message: 'Username cannot contain spaces',
+        },
     },
     email: {
         type: String,

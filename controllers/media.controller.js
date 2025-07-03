@@ -1,8 +1,9 @@
 const Media = require('../models/media.model');
 const List = require('../models/list.model');
 const axios = require('axios');
+const pLimit = require('p-limit').default;
 
-
+const limit = pLimit(40);
 const TMDB_API_KEY = process.env.TMDB_API_KEY; // Accessing the API key from .env
 const TMDB_BASE_URL = process.env.TMDB_BASE_URL; // Accessing the base URL from .env
 
@@ -185,51 +186,55 @@ exports.getLatestMediaByType = async (req, res) => {
         .sort({ createdAt: -1 })
         .limit(15);
   
-      // Step 2: Enrich each media item with TMDb + list title
+      // Step 2: Enrich each media item with TMDb + list title using p-limit
       const enrichedMedia = await Promise.all(
-        latestMedia.map(async (mediaItem) => {
-          try {
-            const mediaObj = mediaItem.toObject();
-            const { tmdbId, type, listId } = mediaObj;
+        latestMedia.map((mediaItem) =>
+          limit(async () => {
+            try {
+              const mediaObj = mediaItem.toObject();
+              const { tmdbId, type, listId } = mediaObj;
   
-            // Fetch TMDb details
-            const [details, videos] = await Promise.all([
-              axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}`, {
-                params: { language: 'en-US' },
-                headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
-              }),
-              axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}/videos`, {
-                headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
-              }),
-            ]);
+              const [details, videos] = await Promise.all([
+                limit(() =>
+                  axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}`, {
+                    params: { language: 'en-US' },
+                    headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
+                  })
+                ),
+                limit(() =>
+                  axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}/videos`, {
+                    headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
+                  })
+                ),
+              ]);
   
-            const trailer = videos.data.results.find(
-              (video) => video.site === 'YouTube' && video.type === 'Trailer'
-            );
+              const trailer = videos.data.results.find(
+                (video) => video.site === 'YouTube' && video.type === 'Trailer'
+              );
   
-            // Optional: Get list name if present
-            let listname = null;
-            if (listId) {
-              const listDetails = await List.findById(listId);
-              listname = listDetails ? listDetails.title : null;
+              let listname = null;
+              if (listId) {
+                const listDetails = await List.findById(listId);
+                listname = listDetails ? listDetails.title : null;
+              }
+  
+              return {
+                ...mediaObj,
+                title: details.data.title || details.data.name,
+                overview: details.data.overview,
+                release_date: details.data.release_date || details.data.first_air_date,
+                vote_average: details.data.vote_average,
+                poster_path: details.data.poster_path,
+                trailer_key: trailer?.key || null,
+                media_type: type,
+                listname,
+              };
+            } catch (err) {
+              console.error(`TMDb enrichment failed for media ID ${mediaItem.tmdbId}:`, err.message);
+              return mediaItem.toObject(); // fallback
             }
-  
-            return {
-              ...mediaObj,
-              title: details.data.title || details.data.name,
-              overview: details.data.overview,
-              release_date: details.data.release_date || details.data.first_air_date,
-              vote_average: details.data.vote_average,
-              poster_path: details.data.poster_path,
-              trailer_key: trailer?.key || null,
-              media_type: type,
-              listname,
-            };
-          } catch (err) {
-            console.error(`TMDb enrichment failed for media ID ${mediaItem.tmdbId}:`, err.message);
-            return mediaItem.toObject(); // fallback to raw item
-          }
-        })
+          })
+        )
       );
   
       res.status(200).json(enrichedMedia);
@@ -237,7 +242,7 @@ exports.getLatestMediaByType = async (req, res) => {
       console.error('Error fetching latest media by type:', error);
       res.status(500).json({
         message: 'Error fetching latest media by type',
-        error: error.message
+        error: error.message,
       });
     }
   };
