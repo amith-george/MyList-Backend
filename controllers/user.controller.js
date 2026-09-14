@@ -145,6 +145,10 @@ exports.resetPassword = async (req, res) => {
 // Update user information
 exports.updateUser = async (req, res) => {
     try {
+      if (req.params.id !== req.user.id) {
+        return res.status(403).json({ message: 'Unauthorized action' });
+      }
+
       const { username, email, password, bio, avatar } = req.body;
   
       // Check if the new username is already taken by another user
@@ -186,6 +190,10 @@ exports.updateUser = async (req, res) => {
 // Delete a user
 exports.deleteUser = async (req, res) => {
     try {
+        if (req.params.id !== req.user.id) {
+            return res.status(403).json({ message: 'Unauthorized action' });
+        }
+
         const user = await User.findByIdAndDelete(req.params.id);
         if (!user) {
             return res.status(404).json({ message: 'User not found' });

@@ -9,6 +9,7 @@ const userRoutes = require('./routes/user.routes'); // Import user routes
 const listRoutes = require('./routes/list.routes'); // Import list routes
 const mediaRoutes = require('./routes/media.routes'); // Import media routes
 const tmdbRoutes = require('./routes/tmdb.routes'); // Import tmdb routes
+const adminRoutes = require('./routes/admin.routes'); // Import admin routes
 
 const app = express();
 
@@ -31,6 +32,7 @@ app.use('/users', userRoutes); // User routes
 app.use('/lists', listRoutes); // List routes
 app.use('/media', mediaRoutes); // Media routes
 app.use('/tmdb', tmdbRoutes); // TMDB routes
+app.use('/admin', adminRoutes); // Admin routes
 
 // Export the app
 module.exports = app;

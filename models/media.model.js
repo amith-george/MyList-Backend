@@ -36,6 +36,17 @@ const mediaSchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
     },
+    overview: { type: String },
+    release_date: { type: String },
+    vote_average: { type: Number },
+    poster_path: { type: String },
+    trailer_key: { type: String },
+    director: { type: String },
+    episode_count: { type: Number },
+    cast: [{
+        name: { type: String },
+        character: { type: String }
+    }],
 });
 
 

@@ -12,8 +12,12 @@ const TMDB_BASE_URL = process.env.TMDB_BASE_URL; // Accessing the base URL from 
 // Create a new list
 exports.createList = async (req, res) => {
     try {
-        const { title, description } = req.body;
         const userId = req.params.userId; // Assuming userId is passed in the request parameters
+        if (userId !== req.user.id) {
+            return res.status(403).json({ message: 'Unauthorized action' });
+        }
+
+        const { title, description } = req.body;
 
         const newList = new List({
             title,
@@ -49,6 +53,9 @@ exports.getListsByUser = async (req, res) => {
 exports.updateList = async (req, res) => {
     try {
         const { userId, id: listId } = req.params;
+        if (userId !== req.user.id) {
+            return res.status(403).json({ message: 'Unauthorized action' });
+        }
 
         // Find the user to verify their list array
         const user = await User.findById(userId);
@@ -80,6 +87,9 @@ exports.updateList = async (req, res) => {
 exports.deleteList = async (req, res) => {
   try {
     const { userId, id: listId } = req.params;
+    if (userId !== req.user.id) {
+        return res.status(403).json({ message: 'Unauthorized action' });
+    }
 
     // Find the user to verify their list array
     const user = await User.findById(userId);

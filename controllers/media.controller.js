@@ -11,13 +11,18 @@ const TMDB_BASE_URL = process.env.TMDB_BASE_URL; // Accessing the base URL from 
 exports.addMediaToList = async (req, res) => {
     try {
         // Extract values from request body and parameters
-        const { tmdbId, title, type, rating, review, userId } = req.body;
+        const { tmdbId, title, type, rating, review } = req.body;
         const listId = req.params.listId;
+        const userId = req.user.id; // Use authenticated user ID instead of body
 
         // Retrieve the list and populate media items to check for duplicates
         const list = await List.findById(listId).populate('mediaItems');
         if (!list) {
             return res.status(404).json({ message: 'List not found' });
+        }
+
+        if (list.user.toString() !== req.user.id) {
+            return res.status(403).json({ message: 'Unauthorized action' });
         }
 
         // Cast tmdbId to a number for comparison
@@ -59,16 +64,21 @@ exports.updateMediaInList = async (req, res) => {
         const { mediaId } = req.params;
         const { title, type, rating, review } = req.body;
 
+        const media = await Media.findById(mediaId);
+        if (!media) {
+            return res.status(404).json({ message: 'Media not found' });
+        }
+
+        if (media.userId.toString() !== req.user.id) {
+            return res.status(403).json({ message: 'Unauthorized action' });
+        }
+
         const updatedMedia = await Media.findByIdAndUpdate(mediaId, {
             title,
             type,
             rating,
             review,
         }, { new: true });
-
-        if (!updatedMedia) {
-            return res.status(404).json({ message: 'Media not found' });
-        }
 
         res.status(200).json({ message: 'Media updated successfully', media: updatedMedia });
     } catch (error) {
@@ -81,6 +91,14 @@ exports.updateMediaInList = async (req, res) => {
 exports.deleteMediaFromList = async (req, res) => {
     try {
         const { mediaId, listId } = req.params;
+
+        const list = await List.findById(listId);
+        if (!list) {
+             return res.status(404).json({ message: 'List not found' });
+        }
+        if (list.user.toString() !== req.user.id) {
+            return res.status(403).json({ message: 'Unauthorized action' });
+        }
 
         // Remove the media item from the list
         await List.findByIdAndUpdate(listId, { $pull: { mediaItems: mediaId } });

@@ -1,18 +1,19 @@
 const express = require('express');
 const router = express.Router();
+const authenticateToken = require('../middleware/auth.middleware');
 const listController = require('../controllers/list.controller');
 
 // Create a new list
-router.post('/:userId/create', listController.createList); // Assuming userId is passed in the URL
+router.post('/:userId/create', authenticateToken, listController.createList); // Assuming userId is passed in the URL
 
 // Get all lists by user
 router.get('/:userId', listController.getListsByUser);
 
 // Update a list
-router.put('/:userId/:id/update', listController.updateList);
+router.put('/:userId/:id/update', authenticateToken, listController.updateList);
 
 // Delete a list
-router.delete('/:userId/:id/delete', listController.deleteList);
+router.delete('/:userId/:id/delete', authenticateToken, listController.deleteList);
 
 // Route to get media counts by type for a list
 router.get('/:userId/:listId/counts', listController.getMediaCountByType);
