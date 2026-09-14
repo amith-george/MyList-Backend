@@ -173,7 +173,7 @@ exports.getMediaCountByType = async (req, res) => {
 exports.getListMediaWithDetails = async (req, res) => {
   try {
     const { userId, id: listId } = req.params;
-    const { page = 1, limit: queryLimit = 28 } = req.query;
+    const { page = 1, limit: queryLimit = 28, sort, filter, search } = req.query;
 
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
@@ -188,9 +188,25 @@ exports.getListMediaWithDetails = async (req, res) => {
     const start = (page - 1) * queryLimit;
     const limitNum = parseInt(queryLimit);
 
-    const totalItems = await Media.countDocuments({ listId: list._id });
-    const paginatedItems = await Media.find({ listId: list._id })
-        .sort({ createdAt: -1 })
+    // 1. Build Match Query (Filter & Search)
+    const matchQuery = { listId: list._id };
+    if (filter === 'movie' || filter === 'tv') {
+        matchQuery.type = filter;
+    }
+    if (search && search.trim() !== '') {
+        const regex = { $regex: search.trim(), $options: 'i' };
+        matchQuery.$or = [{ title: regex }, { name: regex }]; // Assuming `name` might exist instead of `title` for TV, or just searching title
+    }
+
+    // 2. Build Sort Query
+    let sortQuery = { createdAt: -1 }; // Default: added-desc
+    if (sort === 'added-asc') sortQuery = { createdAt: 1 };
+    else if (sort === 'rating-desc') sortQuery = { rating: -1 };
+    else if (sort === 'rating-asc') sortQuery = { rating: 1 };
+
+    const totalItems = await Media.countDocuments(matchQuery);
+    const paginatedItems = await Media.find(matchQuery)
+        .sort(sortQuery)
         .skip(start)
         .limit(limitNum);
 
