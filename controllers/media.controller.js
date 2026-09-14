@@ -10,43 +10,47 @@ const TMDB_BASE_URL = process.env.TMDB_BASE_URL; // Accessing the base URL from 
 // Add media to a list
 exports.addMediaToList = async (req, res) => {
     try {
-        // Extract values from request body and parameters
         const { tmdbId, title, type, rating, review } = req.body;
         const listId = req.params.listId;
         const userId = req.user.id; // Use authenticated user ID instead of body
 
-        // Retrieve the list and populate media items to check for duplicates
-        const list = await List.findById(listId).populate('mediaItems');
-        if (!list) {
-            return res.status(404).json({ message: 'List not found' });
-        }
+        const list = await List.findById(listId);
+        if (!list) return res.status(404).json({ message: 'List not found' });
+        if (list.user.toString() !== req.user.id) return res.status(403).json({ message: 'Unauthorized action' });
 
-        if (list.user.toString() !== req.user.id) {
-            return res.status(403).json({ message: 'Unauthorized action' });
-        }
-
-        // Cast tmdbId to a number for comparison
         const numericTmdbId = Number(tmdbId);
+        const duplicate = await Media.findOne({ listId, tmdbId: numericTmdbId });
+        if (duplicate) return res.status(400).json({ message: 'Media already exists in this list' });
 
-        // Check if the media with the same tmdbId already exists in this list
-        const duplicate = list.mediaItems.find(item => item.tmdbId === numericTmdbId);
-        if (duplicate) {
-            return res.status(400).json({ message: 'Media already exists in this list' });
+        // Fetch TMDB data to cache it permanently
+        let tmdbData = {};
+        try {
+            const [details, videos, credits] = await Promise.all([
+                axios.get(`${TMDB_BASE_URL}/${type}/${numericTmdbId}`, { params: { language: 'en-US' }, headers: { Authorization: `Bearer ${TMDB_API_KEY}` } }),
+                axios.get(`${TMDB_BASE_URL}/${type}/${numericTmdbId}/videos`, { headers: { Authorization: `Bearer ${TMDB_API_KEY}` } }),
+                axios.get(`${TMDB_BASE_URL}/${type}/${numericTmdbId}/credits`, { headers: { Authorization: `Bearer ${TMDB_API_KEY}` } })
+            ]);
+            const trailer = videos.data.results.find(video => video.site === 'YouTube' && video.type === 'Trailer');
+            
+            tmdbData = {
+                overview: details.data.overview,
+                release_date: details.data.release_date || details.data.first_air_date,
+                vote_average: details.data.vote_average,
+                poster_path: details.data.poster_path,
+                trailer_key: trailer?.key || null,
+                director: credits.data.crew.find(c => c.job === 'Director')?.name || null,
+                cast: credits.data.cast.slice(0, 5).map(actor => ({ name: actor.name, character: actor.character })),
+            };
+            if (type === 'tv') tmdbData.episode_count = details.data.number_of_episodes;
+        } catch (err) {
+            console.error('Failed to fetch TMDB data during addMedia:', err.message);
         }
 
-        // Create a new media entry (ensure rating is a number)
         const newMedia = new Media({
-            tmdbId: numericTmdbId,
-            title,
-            type,
-            rating: Number(rating),
-            review,
-            listId, // Associate with the specific list
-            userId  // Associate with the user who added the media
+            tmdbId: numericTmdbId, title, type, rating: Number(rating), review, listId, userId, ...tmdbData
         });
         await newMedia.save();
 
-        // Add the new media item's ID to the list's mediaItems array and save the list
         list.mediaItems.push(newMedia._id);
         await list.save();
 
@@ -78,7 +82,7 @@ exports.updateMediaInList = async (req, res) => {
             type,
             rating,
             review,
-        }, { new: true });
+        }, { new: true, runValidators: true });
 
         res.status(200).json({ message: 'Media updated successfully', media: updatedMedia });
     } catch (error) {
@@ -120,150 +124,50 @@ exports.deleteMediaFromList = async (req, res) => {
 exports.getMediaDetails = async (req, res) => {
     try {
         const { listId, tmdbId } = req.params;
-        
-        // Convert tmdbId to number and validate
         const numericTmdbId = parseInt(tmdbId, 10);
-        if (isNaN(numericTmdbId)) {
-            return res.status(400).json({ message: 'Invalid TMDB ID format' });
-        }
+        if (isNaN(numericTmdbId)) return res.status(400).json({ message: 'Invalid TMDB ID format' });
 
-        // Find list with populated mediaItems
-        const list = await List.findById(listId).populate('mediaItems');
-        if (!list) {
-            return res.status(404).json({ message: 'List not found' });
-        }
+        const media = await Media.findOne({ listId, tmdbId: numericTmdbId });
+        if (!media) return res.status(404).json({ message: 'Media not found in this list' });
 
-        // Find media item with numeric comparison
-        const media = list.mediaItems.find(item => item.tmdbId === numericTmdbId);
-        if (!media) {
-            return res.status(404).json({ message: 'Media not found in this list' });
-        }
-
-        // Get TMDB data
-        const mediaType = media.type;
-        const [detailsResponse, videosResponse, creditsResponse] = await Promise.all([
-            axios.get(`${TMDB_BASE_URL}/${mediaType}/${numericTmdbId}`, {
-                params: { language: 'en-US' },
-                headers: { Authorization: `Bearer ${TMDB_API_KEY}` }
-            }),
-            axios.get(`${TMDB_BASE_URL}/${mediaType}/${numericTmdbId}/videos`, {
-                headers: { Authorization: `Bearer ${TMDB_API_KEY}` }
-            }),
-            axios.get(`${TMDB_BASE_URL}/${mediaType}/${numericTmdbId}/credits`, {
-                headers: { Authorization: `Bearer ${TMDB_API_KEY}` }
-            })
-        ]);
-
-        // Process responses
-        const trailer = videosResponse.data.results.find(
-            video => video.site === 'YouTube' && video.type === 'Trailer'
-        );
-
+        // Since we migrated, we can just return it from the DB instantly
         const responseData = {
-            _id: media._id,
-            type: mediaType,
-            rating: media.rating,
-            review: media.review,
-            ...detailsResponse.data,
-            trailer_key: trailer?.key,
-            director: creditsResponse.data.crew.find(member => member.job === 'Director')?.name,
-            cast: creditsResponse.data.cast.slice(0, 5).map(actor => ({
-                name: actor.name,
-                character: actor.character
-            }))
+            ...media.toObject(),
+            media_type: media.type
         };
 
-        if (mediaType === 'tv') {
-            responseData.episode_count = detailsResponse.data.number_of_episodes;
-        }
-
         res.status(200).json(responseData);
-
     } catch (error) {
         console.error('Error fetching media details:', error);
-        const status = error.response?.status || 500;
-        res.status(status).json({ 
-            message: 'Error fetching media details',
-            error: error.message 
-        });
+        res.status(500).json({ message: 'Error fetching media details', error: error.message });
     }
 };
 
 
-// Get 15 latest media items of a given media type for a specific user, enriched with TMDb data
+// Get 15 latest media items of a given media type for a specific user
 exports.getLatestMediaByType = async (req, res) => {
     try {
       const { userId, mediaType } = req.params;
       const allowedTypes = ['movie', 'tv', 'anime'];
-      if (!allowedTypes.includes(mediaType)) {
-        return res.status(400).json({ message: 'Invalid media type' });
-      }
+      if (!allowedTypes.includes(mediaType)) return res.status(400).json({ message: 'Invalid media type' });
   
-      // Step 1: Fetch latest 15 media items of given type for this user
       const latestMedia = await Media.find({ type: mediaType, userId })
         .sort({ createdAt: -1 })
-        .limit(15);
+        .limit(15)
+        .populate('listId', 'title');
   
-      // Step 2: Enrich each media item with TMDb + list title using p-limit
-      const enrichedMedia = await Promise.all(
-        latestMedia.map((mediaItem) =>
-          limit(async () => {
-            try {
-              const mediaObj = mediaItem.toObject();
-              const { tmdbId, type, listId } = mediaObj;
-  
-              const [details, videos] = await Promise.all([
-                limit(() =>
-                  axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}`, {
-                    params: { language: 'en-US' },
-                    headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
-                  })
-                ),
-                limit(() =>
-                  axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}/videos`, {
-                    headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
-                  })
-                ),
-              ]);
-  
-              const trailer = videos.data.results.find(
-                (video) => video.site === 'YouTube' && video.type === 'Trailer'
-              );
-  
-              let listname = null;
-              if (listId) {
-                const listDetails = await List.findById(listId);
-                listname = listDetails ? listDetails.title : null;
-              }
-  
-              return {
-                ...mediaObj,
-                title: details.data.title || details.data.name,
-                overview: details.data.overview,
-                release_date: details.data.release_date || details.data.first_air_date,
-                vote_average: details.data.vote_average,
-                poster_path: details.data.poster_path,
-                trailer_key: trailer?.key || null,
-                media_type: type,
-                listname,
-              };
-            } catch (err) {
-              console.error(`TMDb enrichment failed for media ID ${mediaItem.tmdbId}:`, err.message);
-              return mediaItem.toObject(); // fallback
-            }
-          })
-        )
-      );
+      const enrichedMedia = latestMedia.map(media => ({
+          ...media.toObject(),
+          media_type: media.type,
+          listname: media.listId ? media.listId.title : null,
+      }));
   
       res.status(200).json(enrichedMedia);
     } catch (error) {
       console.error('Error fetching latest media by type:', error);
-      res.status(500).json({
-        message: 'Error fetching latest media by type',
-        error: error.message,
-      });
+      res.status(500).json({ message: 'Error fetching latest media by type', error: error.message });
     }
-  };
+};
 
 
 // Get stats for a user's media (only rated media)
@@ -271,74 +175,50 @@ exports.getMediaStats = async (req, res) => {
     try {
         const { userId } = req.params;
 
-        // Fetch all media for the user with rating > 0
-        const ratedMedia = await Media.find({
-            userId,
-            rating: { $gt: 0 }
-        });
-
-        // Count by type + rating stats
-        let movieCount = 0;
-        let tvCount = 0;
-        let totalRating = 0;
-        const listRatingCountMap = new Map();
-
-        ratedMedia.forEach(media => {
-            if (media.type === 'movie') {
-                movieCount++;
-            } else if (media.type === 'tv') {
-                tvCount++;
+        const stats = await Media.aggregate([
+            { $match: { userId: new mongoose.Types.ObjectId(userId), rating: { $gt: 0 } } },
+            { 
+                $facet: {
+                    counts: [
+                        { $group: { _id: "$type", count: { $sum: 1 } } }
+                    ],
+                    averages: [
+                        { $group: { _id: null, avgRating: { $avg: "$rating" }, totalRating: { $sum: "$rating" }, count: { $sum: 1 } } }
+                    ],
+                    mostUsedList: [
+                        { $group: { _id: "$listId", count: { $sum: 1 } } },
+                        { $sort: { count: -1 } },
+                        { $limit: 1 }
+                    ]
+                }
             }
+        ]);
 
-            totalRating += media.rating;
+        const result = stats[0];
+        const movieCount = result.counts.find(c => c._id === 'movie')?.count || 0;
+        const tvCount = result.counts.find(c => c._id === 'tv')?.count || 0;
+        
+        const avgRatingObj = result.averages[0];
+        const averageRating = avgRatingObj ? Number(avgRatingObj.avgRating.toFixed(2)) : 0;
 
-            // Count how many rated media per list
-            const listIdStr = String(media.listId);
-            listRatingCountMap.set(
-                listIdStr,
-                (listRatingCountMap.get(listIdStr) || 0) + 1
-            );
-        });
-
-        const averageRating = ratedMedia.length > 0
-            ? (totalRating / ratedMedia.length).toFixed(2)
-            : null;
-
-        // Find the list with the most rated items
-        let mostRatedListId = null;
-        let highestCount = 0;
-        for (const [listId, count] of listRatingCountMap.entries()) {
-            if (count > highestCount) {
-                mostRatedListId = listId;
-                highestCount = count;
-            }
-        }
-
-        // Fetch the list title if a most-used list is found
         let mostUsedList = null;
-        if (mostRatedListId) {
-            const list = await List.findById(mostRatedListId);
+        if (result.mostUsedList.length > 0) {
+            const listId = result.mostUsedList[0]._id;
+            const count = result.mostUsedList[0].count;
+            const list = await List.findById(listId);
             if (list) {
-                mostUsedList = {
-                    listId: list._id,
-                    title: list.title,
-                    count: highestCount
-                };
+                mostUsedList = { listId: list._id, title: list.title, count };
             }
         }
 
         res.status(200).json({
             totalRatedMovies: movieCount,
             totalRatedTVShows: tvCount,
-            averageRating: averageRating ? Number(averageRating) : 0,
+            averageRating,
             mostUsedList
         });
-
     } catch (error) {
         console.error('Error getting media stats:', error);
-        res.status(500).json({
-            message: 'Error getting media stats',
-            error: error.message
-        });
+        res.status(500).json({ message: 'Error getting media stats', error: error.message });
     }
 };

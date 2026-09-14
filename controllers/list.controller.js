@@ -182,67 +182,23 @@ exports.getListMediaWithDetails = async (req, res) => {
       return res.status(403).json({ message: 'List not associated with this user' });
     }
 
-    const list = await List.findById(listId).populate('mediaItems');
+    const list = await List.findById(listId);
     if (!list) return res.status(404).json({ message: 'List not found' });
 
     const start = (page - 1) * queryLimit;
-    const end = start + parseInt(queryLimit);
+    const limitNum = parseInt(queryLimit);
 
-    const paginatedItems = list.mediaItems.slice(start, end);
+    const totalItems = await Media.countDocuments({ listId: list._id });
+    const paginatedItems = await Media.find({ listId: list._id })
+        .sort({ createdAt: -1 })
+        .skip(start)
+        .limit(limitNum);
 
-    const enrichedMedia = await Promise.all(
-      paginatedItems.map(async (media) => {
-        try {
-          const { tmdbId, type } = media;
-
-          const [details, videos, credits] = await Promise.all([
-            limit(() =>
-              axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}`, {
-                params: { language: 'en-US' },
-                headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
-              })
-            ),
-            limit(() =>
-              axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}/videos`, {
-                headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
-              })
-            ),
-            limit(() =>
-              axios.get(`${TMDB_BASE_URL}/${type}/${tmdbId}/credits`, {
-                headers: { Authorization: `Bearer ${TMDB_API_KEY}` },
-              })
-            ),
-          ]);
-
-          const trailer = videos.data.results.find(
-            (video) => video.site === 'YouTube' && video.type === 'Trailer'
-          );
-
-          return {
-            ...media.toObject(),
-            title: details.data.title || details.data.name,
-            overview: details.data.overview,
-            release_date: details.data.release_date || details.data.first_air_date,
-            vote_average: details.data.vote_average,
-            poster_path: details.data.poster_path,
-            media_type: type,
-            trailer_key: trailer?.key || null,
-            director: credits.data.crew.find((c) => c.job === 'Director')?.name || null,
-            cast: credits.data.cast.slice(0, 5).map((actor) => ({
-              name: actor.name,
-              character: actor.character,
-            })),
-          };
-        } catch (err) {
-          console.error(`TMDb fetch failed for media ID ${media.tmdbId}:`, {
-            message: err.message,
-            status: err.response?.status,
-            data: err.response?.data,
-          });
-          return media; // fallback
-        }
-      })
-    );
+    // Map `type` to `media_type` as expected by the frontend
+    const enrichedMedia = paginatedItems.map(item => ({
+        ...item.toObject(),
+        media_type: item.type
+    }));
 
     res.status(200).json({
       list: {
@@ -253,9 +209,9 @@ exports.getListMediaWithDetails = async (req, res) => {
       mediaItems: enrichedMedia,
       pagination: {
         page: Number(page),
-        limit: Number(queryLimit),
-        totalItems: list.mediaItems.length,
-        totalPages: Math.ceil(list.mediaItems.length / queryLimit),
+        limit: limitNum,
+        totalItems,
+        totalPages: Math.ceil(totalItems / limitNum),
       },
     });
   } catch (err) {
