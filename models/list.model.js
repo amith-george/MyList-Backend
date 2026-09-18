@@ -13,15 +13,12 @@ const listSchema = new mongoose.Schema({
         ref: 'User',
         required: true,
     },
-    mediaItems: [{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Media',
-    }],
     createdAt: {
         type: Date,
         default: Date.now,
     },
 });
 
+listSchema.index({ user: 1 });
 const listModel = mongoose.model('List', listSchema);
 module.exports = listModel;

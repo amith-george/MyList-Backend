@@ -20,6 +20,7 @@ const userSchema = new mongoose.Schema({
         unique: true,
         required: true,
         minlength: [5, 'Email must be at least 5 characters long'],
+        match: [/^\S+@\S+\.\S+$/, 'Please use a valid email address'],
     },
     password: {
         type: String,
@@ -39,10 +40,6 @@ const userSchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
     },
-    lists: [{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'List',
-    }],
 });
 
 userSchema.methods.comparePassword = async function(password) {

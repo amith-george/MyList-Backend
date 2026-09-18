@@ -27,9 +27,6 @@ exports.createList = async (req, res) => {
 
         await newList.save();
 
-        // Optionally, you can add the list ID to the user's lists array
-        await User.findByIdAndUpdate(userId, { $push: { lists: newList._id } });
-
         res.status(201).json({ message: 'List created successfully', list: newList });
     } catch (error) {
         res.status(400).json({ message: 'Error creating list', error: error.message });
@@ -57,24 +54,18 @@ exports.updateList = async (req, res) => {
             return res.status(403).json({ message: 'Unauthorized action' });
         }
 
-        // Find the user to verify their list array
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ message: 'User not found' });
-        }
-
-        // Verify the list is associated with this user
-        if (!user.lists.some(list => list.toString() === listId)) {
-            return res.status(403).json({ message: 'List not associated with this user' });
-        }
-
         const { title, description } = req.body;
         const updateData = { title, description };
 
         // Update the list and return the new document
-        const list = await List.findByIdAndUpdate(listId, updateData, { new: true });
+        const list = await List.findOneAndUpdate(
+            { _id: listId, user: req.user.id },
+            updateData,
+            { new: true }
+        );
+        
         if (!list) {
-            return res.status(404).json({ message: 'List not found' });
+            return res.status(404).json({ message: 'List not found or unauthorized' });
         }
         res.status(200).json({ message: 'List updated successfully', list });
     } catch (error) {
@@ -91,28 +82,14 @@ exports.deleteList = async (req, res) => {
         return res.status(403).json({ message: 'Unauthorized action' });
     }
 
-    // Find the user to verify their list array
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Verify the list is associated with this user
-    if (!user.lists.some(list => list.toString() === listId)) {
-      return res.status(403).json({ message: 'List not associated with this user' });
-    }
-
     // Delete the list
-    const list = await List.findByIdAndDelete(listId);
+    const list = await List.findOneAndDelete({ _id: listId, user: req.user.id });
     if (!list) {
-      return res.status(404).json({ message: 'List not found' });
+      return res.status(404).json({ message: 'List not found or unauthorized' });
     }
 
     // Delete all media items associated with the deleted list
     await Media.deleteMany({ listId: list._id });
-
-    // Optionally, remove the list ID from the user's lists array
-    await User.findByIdAndUpdate(list.user, { $pull: { lists: list._id } });
 
     res.status(200).json({ message: 'List and associated media deleted successfully' });
   } catch (error) {
@@ -126,21 +103,13 @@ exports.getMediaCountByType = async (req, res) => {
   try {
     const { userId, listId } = req.params;
 
-    // Verify that the user exists
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Verify the list is associated with this user
-    if (!user.lists.some(list => list.toString() === listId)) {
-      return res.status(403).json({ message: 'List not associated with this user' });
-    }
-
-    // Check that the list exists
+    // Check that the list exists and belongs to the user
     const list = await List.findById(listId);
     if (!list) {
       return res.status(404).json({ message: 'List not found' });
+    }
+    if (list.user.toString() !== userId) {
+      return res.status(403).json({ message: 'List not associated with this user' });
     }
 
     // Use aggregation to count media items by type for the list
@@ -175,15 +144,12 @@ exports.getListMediaWithDetails = async (req, res) => {
     const { userId, id: listId } = req.params;
     const { page = 1, limit: queryLimit = 28, sort, filter, search } = req.query;
 
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    if (!user.lists.includes(listId)) {
-      return res.status(403).json({ message: 'List not associated with this user' });
-    }
-
     const list = await List.findById(listId);
     if (!list) return res.status(404).json({ message: 'List not found' });
+
+    if (list.user.toString() !== userId) {
+      return res.status(403).json({ message: 'List not associated with this user' });
+    }
 
     const start = (page - 1) * queryLimit;
     const limitNum = parseInt(queryLimit);

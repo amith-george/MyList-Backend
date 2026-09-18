@@ -45,21 +45,16 @@ exports.registerUser = async (req, res) => {
         { title: 'Dropped', description: 'Movies or TV shows you have dropped.' },
       ];
   
-      // Create each list and save its _id
-      const createdLists = await Promise.all(
+      // Create each list
+      await Promise.all(
         defaultLists.map(async (listData) => {
           const newList = new List({
             ...listData,
             user: newUser._id,
           });
           await newList.save();
-          return newList._id;
         })
       );
-  
-      // Update the user's lists array
-      newUser.lists = createdLists;
-      await newUser.save();
   
       res.status(201).json({ message: 'User created successfully', user: newUser });
     } catch (error) {

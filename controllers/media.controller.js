@@ -51,9 +51,6 @@ exports.addMediaToList = async (req, res) => {
         });
         await newMedia.save();
 
-        list.mediaItems.push(newMedia._id);
-        await list.save();
-
         res.status(201).json({ message: 'Media added to list successfully', media: newMedia });
     } catch (error) {
         res.status(400).json({ message: 'Error adding media to list', error: error.message });
@@ -103,9 +100,6 @@ exports.deleteMediaFromList = async (req, res) => {
         if (list.user.toString() !== req.user.id) {
             return res.status(403).json({ message: 'Unauthorized action' });
         }
-
-        // Remove the media item from the list
-        await List.findByIdAndUpdate(listId, { $pull: { mediaItems: mediaId } });
 
         // Delete the media item from the database
         const deletedMedia = await Media.findByIdAndDelete(mediaId);

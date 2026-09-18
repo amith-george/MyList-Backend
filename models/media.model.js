@@ -51,6 +51,7 @@ const mediaSchema = new mongoose.Schema({
 
 
 mediaSchema.index({ tmdbId: 1, listId: 1 }, { unique: true });
-
+mediaSchema.index({ listId: 1, type: 1, createdAt: -1 });
+mediaSchema.index({ userId: 1, type: 1, createdAt: -1 });
 const Media = mongoose.model('Media', mediaSchema);
 module.exports = Media;
