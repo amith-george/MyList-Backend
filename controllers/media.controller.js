@@ -1,6 +1,7 @@
 const Media = require('../models/media.model');
 const List = require('../models/list.model');
 const axios = require('axios');
+const mongoose = require('mongoose');
 const pLimit = require('p-limit').default;
 
 const limit = pLimit(40);
